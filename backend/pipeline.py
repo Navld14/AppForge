@@ -193,11 +193,16 @@ class AppForgePipeline:
         return message.content[0].text
 
     def _extract_json(self, text: str) -> Any:
-        text = text.strip()
-        text = re.sub(r'^```(?:json)?\s*', '', text)
-        text = re.sub(r'\s*```$', '', text)
-        text = text.strip()
-        return json.loads(text)
+    text = text.strip()
+    # Remove markdown fences
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
+    text = text.strip()
+    # Find JSON object or array
+    match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+    if match:
+        text = match.group(1)
+    return json.loads(text)
 
     def _parse_and_repair(self, client: anthropic.Anthropic, raw: str, stage: str, api_key: str):
         try:
