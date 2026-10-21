@@ -16,8 +16,8 @@ Return ONLY valid JSON in this exact schema:
   "core_entities": ["list of main data entities"],
   "features": ["list of explicit features requested"],
   "roles": ["list of user roles"],
-  "auth_required": true/false,
-  "payment_required": true/false,
+  "auth_required": true,
+  "payment_required": false,
   "ambiguities": ["list of unclear or missing requirements"],
   "assumptions": ["list of reasonable assumptions made"]
 }
@@ -34,8 +34,8 @@ Return ONLY valid JSON in this exact schema:
     {
       "name": "string",
       "description": "string",
-      "fields": [{"name": "string", "type": "string", "required": true/false}],
-      "relations": [{"entity": "string", "type": "one_to_many|many_to_many|one_to_one"}]
+      "fields": [{"name": "string", "type": "string", "required": true}],
+      "relations": [{"entity": "string", "type": "one_to_many"}]
     }
   ],
   "flows": [
@@ -60,21 +60,21 @@ Return ONLY valid JSON in this exact schema:
       {
         "name": "string",
         "columns": [
-          {"name": "string", "type": "string", "nullable": true/false, "primary_key": true/false, "foreign_key": "table.column or null"}
+          {"name": "string", "type": "string", "nullable": true, "primary_key": false, "foreign_key": null}
         ],
-        "indexes": ["list of column names to index"]
+        "indexes": ["column_name"]
       }
     ]
   },
   "api_schema": {
     "endpoints": [
       {
-        "method": "GET|POST|PUT|DELETE",
+        "method": "GET",
         "path": "string",
         "description": "string",
-        "request_body": {"field": "type"},
-        "response": {"field": "type"},
-        "auth_required": true/false,
+        "request_body": {},
+        "response": {},
+        "auth_required": true,
         "roles_allowed": ["string"]
       }
     ]
@@ -85,20 +85,20 @@ Return ONLY valid JSON in this exact schema:
         "name": "string",
         "route": "string",
         "components": [
-          {"type": "string", "props": {}, "data_source": "api_endpoint or null"}
+          {"type": "string", "props": {}, "data_source": null}
         ],
-        "auth_required": true/false,
+        "auth_required": true,
         "roles_allowed": ["string"]
       }
     ]
   },
   "auth_schema": {
-    "strategy": "string (jwt, session, oauth, etc.)",
+    "strategy": "jwt",
     "roles": [
-      {"name": "string", "inherits": "string or null", "permissions": ["string"]}
+      {"name": "string", "inherits": null, "permissions": ["string"]}
     ],
     "protected_routes": ["string"],
-    "token_expiry": "string"
+    "token_expiry": "24h"
   }
 }
 
@@ -106,19 +106,14 @@ Architecture: {architecture}""",
 
     "refinement": """You are Stage 4 of an app compiler: Refinement Layer.
 
-Review all schemas for inconsistencies and fix them. Check:
-1. Every API endpoint's request/response fields exist in DB schema
-2. Every UI page's data_source matches a real API endpoint
-3. Every role referenced in API/UI exists in auth_schema
-4. Foreign keys reference real tables and columns
-5. No orphaned entities
+Review all schemas for inconsistencies and fix them.
 
-Return the COMPLETE corrected output as ONLY valid JSON with this schema:
+Return the COMPLETE corrected output as ONLY valid JSON:
 {
-  "db_schema": { ...same as before... },
-  "api_schema": { ...same as before... },
-  "ui_schema": { ...same as before... },
-  "auth_schema": { ...same as before... },
+  "db_schema": {},
+  "api_schema": {},
+  "ui_schema": {},
+  "auth_schema": {},
   "refinement_notes": ["list of issues found and fixed"]
 }
 
@@ -137,7 +132,7 @@ class AppForgePipeline:
 
         # Stage 1: Intent Extraction
         intent_raw = await self._call_llm(client, STAGE_PROMPTS["intent"].format(prompt=prompt))
-        intent, err = self._parse_and_repair(client, intent_raw, "intent", api_key)
+        intent, err = self._parse_and_repair(client, intent_raw, "intent")
         stages["intent"] = intent
         if err:
             errors.append({"stage": "intent", "issue": err})
@@ -146,7 +141,7 @@ class AppForgePipeline:
         arch_raw = await self._call_llm(client, STAGE_PROMPTS["architecture"].format(
             intent=json.dumps(intent, indent=2)
         ))
-        architecture, err = self._parse_and_repair(client, arch_raw, "architecture", api_key)
+        architecture, err = self._parse_and_repair(client, arch_raw, "architecture")
         stages["architecture"] = architecture
         if err:
             errors.append({"stage": "architecture", "issue": err})
@@ -155,7 +150,7 @@ class AppForgePipeline:
         schema_raw = await self._call_llm(client, STAGE_PROMPTS["schema"].format(
             architecture=json.dumps(architecture, indent=2)
         ))
-        schemas, err = self._parse_and_repair(client, schema_raw, "schema", api_key)
+        schemas, err = self._parse_and_repair(client, schema_raw, "schema")
         stages["schemas"] = schemas
         if err:
             errors.append({"stage": "schema", "issue": err})
@@ -166,12 +161,11 @@ class AppForgePipeline:
             architecture=json.dumps(architecture, indent=2),
             schemas=json.dumps(schemas, indent=2)
         ))
-        refined, err = self._parse_and_repair(client, refined_raw, "refinement", api_key)
+        refined, err = self._parse_and_repair(client, refined_raw, "refinement")
         stages["refined_output"] = refined
         if err:
             errors.append({"stage": "refinement", "issue": err})
 
-        # Validate cross-layer consistency
         validation_report = self._validate_consistency(refined)
 
         return {
@@ -193,18 +187,18 @@ class AppForgePipeline:
         return message.content[0].text
 
     def _extract_json(self, text: str) -> Any:
-    text = text.strip()
-    # Remove markdown fences
-    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
-    text = text.strip()
-    # Find JSON object or array
-    match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-    return json.loads(text)
+        text = text.strip()
+        # Remove markdown fences
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
+        text = text.strip()
+        # Find JSON object or array
+        match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+        if match:
+            text = match.group(1)
+        return json.loads(text)
 
-    def _parse_and_repair(self, client: anthropic.Anthropic, raw: str, stage: str, api_key: str):
+    def _parse_and_repair(self, client: anthropic.Anthropic, raw: str, stage: str):
         try:
             return self._extract_json(raw), None
         except json.JSONDecodeError as e:
