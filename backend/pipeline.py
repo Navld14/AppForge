@@ -187,7 +187,6 @@ class AppForgePipeline:
         }
 
     async def _call_llm(self, client: genai.Client, prompt: str) -> str:
-        # Enforce JSON mime-type directly on Gemini
         response = await client.aio.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
@@ -222,6 +221,9 @@ class AppForgePipeline:
     def _validate_consistency(self, refined: dict) -> dict:
         issues = []
         passed = []
+
+        if not isinstance(refined, dict):
+            return {"passed": [], "issues": ["Invalid refinement payload"], "is_valid": False}
 
         try:
             db = refined.get("db_schema", {})
