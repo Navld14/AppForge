@@ -4,7 +4,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.0-flash"
 
 STAGE_PROMPTS = {
     "intent": """You are Stage 1 of an app compiler: Intent Extraction.
