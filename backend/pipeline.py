@@ -190,8 +190,15 @@ class AppForgePipeline:
         }
 
     async def _call_llm(self, model: genai.GenerativeModel, prompt: str) -> str:
-        response = await model.generate_content_async(prompt)
-        return response.text or "{}"
+        for attempt in range(3):
+            try:
+                response = await model.generate_content_async(prompt)
+                return response.text or "{}"
+            except Exception as e:
+                if ("429" in str(e) or "quota" in str(e).lower()) and attempt < 2:
+                    await asyncio.sleep(4.0 * (attempt + 1))  # Wait 4s, then 8s
+                    continue
+                raise e
 
     def _extract_json(self, text: str) -> tuple[Any, str | None]:
         text = text.strip()
