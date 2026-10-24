@@ -132,11 +132,13 @@ Schemas: {schemas}"""
 class AppForgePipeline:
 
     async def run(self, prompt: str, api_key: str) -> dict:
+        # PASTE IT HERE:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
+            model_name="gemini-1.5-flash-latest",
             generation_config={"response_mime_type": "application/json"}
         )
+
         stages = {}
         errors = []
 
