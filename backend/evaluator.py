@@ -21,8 +21,8 @@ class Evaluator:
         failure_type = None
 
         try:
-            # Set a 30s timeout per prompt so nothing hangs forever
-            result = await asyncio.wait_for(self.pipeline.run(item["prompt"], api_key), timeout=35.0)
+            # 60s timeout per prompt
+            result = await asyncio.wait_for(self.pipeline.run(item["prompt"], api_key), timeout=60.0)
             success = result.get("success", False)
             retries = result.get("retries_used", 0)
 
@@ -32,7 +32,11 @@ class Evaluator:
         except asyncio.TimeoutError:
             failure_type = "Request Timed Out"
         except Exception as e:
-            failure_type = str(e)[:100]
+            err_msg = str(e)
+            if "429" in err_msg or "quota" in err_msg.lower():
+                failure_type = "Rate Limited (429)"
+            else:
+                failure_type = err_msg[:80]
 
         latency = round(time.time() - start, 2)
 
@@ -48,16 +52,20 @@ class Evaluator:
 
     async def run(self, api_key: str, max_prompts: int = 5) -> dict:
         prompts_to_test = EVAL_PROMPTS[:max_prompts]
-        
-        # Run all test prompts concurrently
-        tasks = [self._test_single_prompt(item, api_key) for item in prompts_to_test]
-        results = await asyncio.gather(*tasks)
+        results = []
+
+        # Run prompts sequentially with a small delay to stay under the 15 RPM free-tier limit
+        for item in prompts_to_test:
+            res = await self._test_single_prompt(item, api_key)
+            results.append(res)
+            # Sleep 3 seconds between test prompts to let the rate limit window reset
+            await asyncio.sleep(3.0)
 
         total = len(results)
         successes = sum(1 for r in results if r["success"])
         avg_latency = round(sum(r["latency_seconds"] for r in results) / total, 2)
         avg_retries = round(sum(r["retries"] for r in results) / total, 2)
-        
+
         failure_types = {}
         for r in results:
             if r["failure_type"]:
@@ -73,5 +81,5 @@ class Evaluator:
                 "failure_types": failure_types
             },
             "per_prompt_results": results,
-            "note": f"Ran {max_prompts} prompts concurrently."
+            "note": f"Ran {max_prompts} prompts with rate-limit pacing."
         }
