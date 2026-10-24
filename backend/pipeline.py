@@ -3,7 +3,7 @@ import re
 from typing import Any
 import google.generativeai as genai
 
-MODEL_NAME = "gemini-1.5-flash-latest"
+MODEL_NAME = "gemini-flash-latest"    
 
 STAGE_PROMPTS = {
     "intent": """You are Stage 1 of an app compiler: Intent Extraction.
@@ -132,10 +132,9 @@ Schemas: {schemas}"""
 class AppForgePipeline:
 
     async def run(self, prompt: str, api_key: str) -> dict:
-        # PASTE IT HERE:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name=MODEL_NAME,
             generation_config={"response_mime_type": "application/json"}
         )
         stages = {}
