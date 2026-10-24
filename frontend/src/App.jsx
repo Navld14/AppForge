@@ -22,7 +22,7 @@ export default function App() {
               <input
                 className="key-input"
                 type="password"
-                placeholder="Enter Anthropic API key..."
+                placeholder="Enter Gemini API key..."
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
               />
@@ -51,7 +51,7 @@ export default function App() {
         {!keySet ? (
           <div className="no-key-msg">
             <div className="no-key-icon">🔑</div>
-            <h2>Enter your Anthropic API key above to get started</h2>
+            <h2>Enter your Gemini API key above to get started</h2>
             <p>Your key is never stored — it's only used for this session.</p>
           </div>
         ) : tab === "generate" ? (
