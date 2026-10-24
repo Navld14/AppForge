@@ -1,8 +1,7 @@
 import json
 import re
 from typing import Any
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 MODEL_NAME = "gemini-1.5-flash"
 
@@ -133,13 +132,17 @@ Schemas: {schemas}"""
 class AppForgePipeline:
 
     async def run(self, prompt: str, api_key: str) -> dict:
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            generation_config={"response_mime_type": "application/json"}
+        )
         stages = {}
         errors = []
 
         # Stage 1: Intent
         prompt_text = STAGE_PROMPTS["intent"].replace("{prompt}", prompt)
-        intent_raw = await self._call_llm(client, prompt_text)
+        intent_raw = await self._call_llm(model, prompt_text)
         intent, err = self._extract_json(intent_raw)
         stages["intent"] = intent
         if err:
@@ -147,7 +150,7 @@ class AppForgePipeline:
 
         # Stage 2: Architecture
         arch_prompt = STAGE_PROMPTS["architecture"].replace("{intent}", json.dumps(intent, indent=2))
-        arch_raw = await self._call_llm(client, arch_prompt)
+        arch_raw = await self._call_llm(model, arch_prompt)
         architecture, err = self._extract_json(arch_raw)
         stages["architecture"] = architecture
         if err:
@@ -155,7 +158,7 @@ class AppForgePipeline:
 
         # Stage 3: Schema Generation
         schema_prompt = STAGE_PROMPTS["schema"].replace("{architecture}", json.dumps(architecture, indent=2))
-        schema_raw = await self._call_llm(client, schema_prompt)
+        schema_raw = await self._call_llm(model, schema_prompt)
         schemas, err = self._extract_json(schema_raw)
         stages["schemas"] = schemas
         if err:
@@ -168,7 +171,7 @@ class AppForgePipeline:
             .replace("{architecture}", json.dumps(architecture, indent=2))
             .replace("{schemas}", json.dumps(schemas, indent=2))
         )
-        refined_raw = await self._call_llm(client, refined_prompt)
+        refined_raw = await self._call_llm(model, refined_prompt)
         refined, err = self._extract_json(refined_raw)
         stages["refined_output"] = refined
         if err:
@@ -186,14 +189,8 @@ class AppForgePipeline:
             "retries_used": sum(1 for e in errors if e)
         }
 
-    async def _call_llm(self, client: genai.Client, prompt: str) -> str:
-        response = await client.aio.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
+    async def _call_llm(self, model: genai.GenerativeModel, prompt: str) -> str:
+        response = await model.generate_content_async(prompt)
         return response.text or "{}"
 
     def _extract_json(self, text: str) -> tuple[Any, str | None]:
