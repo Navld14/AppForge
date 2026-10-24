@@ -138,36 +138,37 @@ class AppForgePipeline:
         errors = []
 
         # Stage 1: Intent
-        intent_raw = await self._call_llm(client, STAGE_PROMPTS["intent"].format(prompt=prompt))
+        prompt_text = STAGE_PROMPTS["intent"].replace("{prompt}", prompt)
+        intent_raw = await self._call_llm(client, prompt_text)
         intent, err = self._extract_json(intent_raw)
         stages["intent"] = intent
         if err:
             errors.append({"stage": "intent", "issue": err})
 
         # Stage 2: Architecture
-        arch_raw = await self._call_llm(client, STAGE_PROMPTS["architecture"].format(
-            intent=json.dumps(intent, indent=2)
-        ))
+        arch_prompt = STAGE_PROMPTS["architecture"].replace("{intent}", json.dumps(intent, indent=2))
+        arch_raw = await self._call_llm(client, arch_prompt)
         architecture, err = self._extract_json(arch_raw)
         stages["architecture"] = architecture
         if err:
             errors.append({"stage": "architecture", "issue": err})
 
         # Stage 3: Schema Generation
-        schema_raw = await self._call_llm(client, STAGE_PROMPTS["schema"].format(
-            architecture=json.dumps(architecture, indent=2)
-        ))
+        schema_prompt = STAGE_PROMPTS["schema"].replace("{architecture}", json.dumps(architecture, indent=2))
+        schema_raw = await self._call_llm(client, schema_prompt)
         schemas, err = self._extract_json(schema_raw)
         stages["schemas"] = schemas
         if err:
             errors.append({"stage": "schema", "issue": err})
 
         # Stage 4: Refinement
-        refined_raw = await self._call_llm(client, STAGE_PROMPTS["refinement"].format(
-            intent=json.dumps(intent, indent=2),
-            architecture=json.dumps(architecture, indent=2),
-            schemas=json.dumps(schemas, indent=2)
-        ))
+        refined_prompt = (
+            STAGE_PROMPTS["refinement"]
+            .replace("{intent}", json.dumps(intent, indent=2))
+            .replace("{architecture}", json.dumps(architecture, indent=2))
+            .replace("{schemas}", json.dumps(schemas, indent=2))
+        )
+        refined_raw = await self._call_llm(client, refined_prompt)
         refined, err = self._extract_json(refined_raw)
         stages["refined_output"] = refined
         if err:
