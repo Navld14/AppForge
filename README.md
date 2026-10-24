@@ -9,7 +9,7 @@ A full-stack multi-stage AI compilation pipeline that turns high-level natural l
 ![Gemini](https://img.shields.io/badge/Google_Gemini-API-4285F4?style=flat-square&logo=google)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-🌐 **Live Demo:** [https://gen-app-nav3.vercel.app/](https://gen-app-nav3.vercel.app/)  
+🌐 **Live Demo:** [Try it here][https://gen-app-nav3.vercel.app/](https://gen-app-nav3.vercel.app/)  
 📦 **Repository:** [https://github.com/Navld14/GenAPP](https://github.com/Navld14/GenAPP)
 
 ---
