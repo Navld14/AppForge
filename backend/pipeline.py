@@ -135,10 +135,9 @@ class AppForgePipeline:
         # PASTE IT HERE:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
+            model_name="gemini-1.5-flash",
             generation_config={"response_mime_type": "application/json"}
         )
-
         stages = {}
         errors = []
 
