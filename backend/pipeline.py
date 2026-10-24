@@ -1,8 +1,10 @@
-import anthropic
 import json
 import re
 from typing import Any
+from google import genai
+from google.genai import types
 
+MODEL_NAME = "gemini-2.5-flash"
 
 STAGE_PROMPTS = {
     "intent": """You are Stage 1 of an app compiler: Intent Extraction.
@@ -60,9 +62,9 @@ Return ONLY valid JSON in this exact schema:
       {
         "name": "string",
         "columns": [
-          {"name": "string", "type": "string", "nullable": true, "primary_key": false, "foreign_key": null}
+          {"name": "string", "type": "string", "nullable": false, "primary_key": true, "foreign_key": null}
         ],
-        "indexes": ["column_name"]
+        "indexes": ["list of column names to index"]
       }
     ]
   },
@@ -98,7 +100,7 @@ Return ONLY valid JSON in this exact schema:
       {"name": "string", "inherits": null, "permissions": ["string"]}
     ],
     "protected_routes": ["string"],
-    "token_expiry": "24h"
+    "token_expiry": "string"
   }
 }
 
@@ -106,14 +108,19 @@ Architecture: {architecture}""",
 
     "refinement": """You are Stage 4 of an app compiler: Refinement Layer.
 
-Review all schemas for inconsistencies and fix them.
+Review all schemas for inconsistencies and fix them. Check:
+1. Every API endpoint's request/response fields exist in DB schema
+2. Every UI page's data_source matches a real API endpoint
+3. Every role referenced in API/UI exists in auth_schema
+4. Foreign keys reference real tables and columns
+5. No orphaned entities
 
-Return the COMPLETE corrected output as ONLY valid JSON:
+Return the COMPLETE corrected output as ONLY valid JSON with this schema:
 {
-  "db_schema": {},
-  "api_schema": {},
-  "ui_schema": {},
-  "auth_schema": {},
+  "db_schema": { ... },
+  "api_schema": { ... },
+  "ui_schema": { ... },
+  "auth_schema": { ... },
   "refinement_notes": ["list of issues found and fixed"]
 }
 
@@ -126,13 +133,13 @@ Schemas: {schemas}"""
 class AppForgePipeline:
 
     async def run(self, prompt: str, api_key: str) -> dict:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = genai.Client(api_key=api_key)
         stages = {}
         errors = []
 
-        # Stage 1: Intent Extraction
+        # Stage 1: Intent
         intent_raw = await self._call_llm(client, STAGE_PROMPTS["intent"].format(prompt=prompt))
-        intent, err = self._parse_and_repair(client, intent_raw, "intent")
+        intent, err = self._extract_json(intent_raw)
         stages["intent"] = intent
         if err:
             errors.append({"stage": "intent", "issue": err})
@@ -141,7 +148,7 @@ class AppForgePipeline:
         arch_raw = await self._call_llm(client, STAGE_PROMPTS["architecture"].format(
             intent=json.dumps(intent, indent=2)
         ))
-        architecture, err = self._parse_and_repair(client, arch_raw, "architecture")
+        architecture, err = self._extract_json(arch_raw)
         stages["architecture"] = architecture
         if err:
             errors.append({"stage": "architecture", "issue": err})
@@ -150,7 +157,7 @@ class AppForgePipeline:
         schema_raw = await self._call_llm(client, STAGE_PROMPTS["schema"].format(
             architecture=json.dumps(architecture, indent=2)
         ))
-        schemas, err = self._parse_and_repair(client, schema_raw, "schema")
+        schemas, err = self._extract_json(schema_raw)
         stages["schemas"] = schemas
         if err:
             errors.append({"stage": "schema", "issue": err})
@@ -161,7 +168,7 @@ class AppForgePipeline:
             architecture=json.dumps(architecture, indent=2),
             schemas=json.dumps(schemas, indent=2)
         ))
-        refined, err = self._parse_and_repair(client, refined_raw, "refinement")
+        refined, err = self._extract_json(refined_raw)
         stages["refined_output"] = refined
         if err:
             errors.append({"stage": "refinement", "issue": err})
@@ -169,7 +176,7 @@ class AppForgePipeline:
         validation_report = self._validate_consistency(refined)
 
         return {
-            "success": True,
+            "success": validation_report.get("is_valid", False),
             "prompt": prompt,
             "stages": stages,
             "final_output": refined,
@@ -178,45 +185,38 @@ class AppForgePipeline:
             "retries_used": sum(1 for e in errors if e)
         }
 
-    async def _call_llm(self, client: anthropic.Anthropic, prompt: str) -> str:
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}]
+    async def _call_llm(self, client: genai.Client, prompt: str) -> str:
+        # Enforce JSON mime-type directly on Gemini
+        response = await client.aio.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
         )
-        return message.content[0].text
+        return response.text or "{}"
 
-    def _extract_json(self, text: str) -> Any:
+    def _extract_json(self, text: str) -> tuple[Any, str | None]:
         text = text.strip()
-        # Remove markdown fences
         text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-        text = re.sub(r'\s*```\s*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
         text = text.strip()
-        # Find JSON object or array
-        match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+
+        match = re.search(r'(\{[\s\S]*\})', text)
         if match:
             text = match.group(1)
-        return json.loads(text)
 
-    def _parse_and_repair(self, client: anthropic.Anthropic, raw: str, stage: str):
         try:
-            return self._extract_json(raw), None
-        except json.JSONDecodeError as e:
-            repair_prompt = f"""The following text should be valid JSON but has errors: {str(e)}
-
-Text:
-{raw}
-
-Return ONLY the corrected valid JSON, nothing else, no markdown fences."""
-            try:
-                repaired = client.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=4000,
-                    messages=[{"role": "user", "content": repair_prompt}]
-                ).content[0].text
-                return self._extract_json(repaired), f"JSON repair needed in {stage} stage"
-            except Exception as e2:
-                return {"error": f"Could not parse {stage} output", "raw": raw[:500]}, str(e2)
+            return json.loads(text), None
+        except Exception as e:
+            fallback = {
+                "error": "Failed to parse JSON",
+                "app_name": "App",
+                "tables": [],
+                "endpoints": [],
+                "pages": []
+            }
+            return fallback, str(e)[:60]
 
     def _validate_consistency(self, refined: dict) -> dict:
         issues = []
@@ -228,27 +228,28 @@ Return ONLY the corrected valid JSON, nothing else, no markdown fences."""
             ui = refined.get("ui_schema", {})
             auth = refined.get("auth_schema", {})
 
-            db_tables = {t["name"] for t in db.get("tables", [])}
+            db_tables = {t.get("name") for t in db.get("tables", []) if isinstance(t, dict)}
 
-            api_endpoints = [e["path"] for e in api.get("endpoints", [])]
+            api_endpoints = [e.get("path") for e in api.get("endpoints", []) if isinstance(e, dict)]
             if api_endpoints:
                 passed.append(f"{len(api_endpoints)} API endpoints generated")
 
             ui_pages = ui.get("pages", [])
-            pages_with_routes = [p for p in ui_pages if p.get("route")]
-            if len(pages_with_routes) == len(ui_pages):
+            pages_with_routes = [p for p in ui_pages if isinstance(p, dict) and p.get("route")]
+            if ui_pages and len(pages_with_routes) == len(ui_pages):
                 passed.append("All UI pages have routes")
-            else:
+            elif ui_pages:
                 issues.append(f"{len(ui_pages) - len(pages_with_routes)} UI pages missing routes")
 
-            auth_roles = {r["name"] for r in auth.get("roles", [])}
+            auth_roles = {r.get("name") for r in auth.get("roles", []) if isinstance(r, dict)}
             for ep in api.get("endpoints", []):
-                for role in ep.get("roles_allowed", []):
-                    if role not in auth_roles:
-                        issues.append(f"API endpoint '{ep['path']}' references undefined role '{role}'")
+                if isinstance(ep, dict):
+                    for role in ep.get("roles_allowed", []):
+                        if role not in auth_roles:
+                            issues.append(f"API endpoint '{ep.get('path')}' references undefined role '{role}'")
 
             if db_tables:
-                passed.append(f"DB schema has {len(db_tables)} tables: {', '.join(db_tables)}")
+                passed.append(f"DB schema has {len(db_tables)} tables: {', '.join(filter(None, db_tables))}")
 
         except Exception as e:
             issues.append(f"Validation error: {str(e)}")
@@ -256,5 +257,5 @@ Return ONLY the corrected valid JSON, nothing else, no markdown fences."""
         return {
             "passed": passed,
             "issues": issues,
-            "is_valid": len(issues) == 0
+            "is_valid": len(issues) == 0 and len(passed) > 0
         }
