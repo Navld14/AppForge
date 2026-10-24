@@ -3,7 +3,7 @@ import re
 from typing import Any
 import google.generativeai as genai
 
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-1.5-flash-latest"
 
 STAGE_PROMPTS = {
     "intent": """You are Stage 1 of an app compiler: Intent Extraction.
