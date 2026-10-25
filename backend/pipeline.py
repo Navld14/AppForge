@@ -149,6 +149,8 @@ class AppForgePipeline:
         if err:
             errors.append({"stage": "intent", "issue": err})
 
+        await asyncio.sleep(1.5)
+
         # Stage 2: Architecture
         arch_prompt = STAGE_PROMPTS["architecture"].replace("{intent}", json.dumps(intent, indent=2))
         arch_raw = await self._call_llm(model, arch_prompt)
@@ -157,6 +159,8 @@ class AppForgePipeline:
         if err:
             errors.append({"stage": "architecture", "issue": err})
 
+        await asyncio.sleep(1.5)
+
         # Stage 3: Schema Generation
         schema_prompt = STAGE_PROMPTS["schema"].replace("{architecture}", json.dumps(architecture, indent=2))
         schema_raw = await self._call_llm(model, schema_prompt)
@@ -164,6 +168,8 @@ class AppForgePipeline:
         stages["schemas"] = schemas
         if err:
             errors.append({"stage": "schema", "issue": err})
+
+        await asyncio.sleep(1.5)
 
         # Stage 4: Refinement
         refined_prompt = (
@@ -177,7 +183,6 @@ class AppForgePipeline:
         stages["refined_output"] = refined
         if err:
             errors.append({"stage": "refinement", "issue": err})
-
         validation_report = self._validate_consistency(refined)
 
         return {
