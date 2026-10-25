@@ -50,7 +50,7 @@ class Evaluator:
             "latency_seconds": latency
         }
 
-    async def run(self, api_key: str, max_prompts: int = 5) -> dict:
+    async def run(self, api_key: str, max_prompts: int = 3) -> dict:
         prompts_to_test = EVAL_PROMPTS[:max_prompts]
         results = []
 
